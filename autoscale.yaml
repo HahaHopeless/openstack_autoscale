@@ -1,0 +1,345 @@
+heat_template_version: ocata
+description: Webserver-Cluster with a Load Balancer
+#based on https://git.openstack.org/cgit/openstack/heat-templates/tree/hot/lbaasv2/lb_group.yaml
+
+#this section (parameters) allows the specification of input parameters (with default values)
+parameters:
+  #network parameters (neutron)
+  public_network:
+    type: string
+    label: public network
+    description: public network (id or name) that is used as external network
+    default: 96a1e024-5593-4936-bdad-869e4accac61
+
+  dns_nameserver:
+    type: comma_delimited_list
+    label: dns nameserver
+    description: ip addresses of dns servers that are used for neutron subnet creation
+    default: 192.168.73.252
+
+  #compute parameters (nova)
+  ssh_key_name:
+    type: string
+    label: ssh key name
+    description: name of an existing ssh keypair that is injected during instance initialization
+    default: key
+    hidden: false
+    constraints:
+      - custom_constraint: nova.keypair
+
+  image_id:
+    type: string
+    label: image id
+    description: image id that is used for instance creation
+    default: a0d4c4ee-db97-4219-91f9-5d40372ce8c1
+    hidden: false
+    constraints:
+      - custom_constraint: glance.image
+
+  instance_flavor:
+    type: string
+    label: instance flavor that is used for instance creation
+    description: flavor used for instances
+    #default: m1.small
+    default: 2
+    hidden: false
+    constraints:
+      - custom_constraint: nova.flavor
+
+  server_name:
+   type: string
+   label: server name
+   description: name of the instances
+   hidden: false
+   default: webserver
+
+  username:
+    type: string
+    label: username
+    description: username of the additional user
+    hidden: false
+    default: admin
+
+  gecos:
+    type: string
+    label: users full name
+    description: full name of the additional user
+    hidden: false
+    default: admin user
+
+  user_key:
+    type: string
+    label: users public key
+    description: public key of the additional user that is injected during instance initialization
+    hidden: false
+    default: ssh-rsa key
+
+#this section (resources) allows the definition of openstack resources that are deployed as a heat stack
+resources:
+  #network resources
+  #create a neutron network
+  private_network:
+    type: OS::Neutron::Net
+    properties:
+      name: CloudcompGrp15-net
+  private_network_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      cidr: 192.168.0.0/24
+      gateway_ip: 192.168.0.1
+      allocation_pools: [{ "start": 192.168.0.50, "end": 192.168.0.200 }]
+      network: { get_resource: private_network }
+      name: CloudCompGrp15-subnet
+      dns_nameservers: { get_param: dns_nameserver }
+      enable_dhcp: true
+
+  #create a neutron router and connect it to the external network
+  cloudComp_router:
+    type: OS::Neutron::Router
+    properties:
+      name: CloudCompGrp15-router
+      external_gateway_info:
+        network: { get_param: public_network }
+
+  #connect the neutron router to the neutron private subnet
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: cloudComp_router }
+      subnet: { get_resource: private_network_subnet }
+
+  #create a neutron security group for server access (allowing ssh and http)
+  webserver_SG:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: demo specific security group
+      name: webserver_SG
+      rules:
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+
+  #create a neutron load balancer
+  lb:
+    type: OS::Neutron::LBaaS::LoadBalancer
+    properties:
+      vip_subnet: { get_resource: private_network_subnet }
+
+  #create a neutron load balancer listener
+  lb_listener:
+    type: OS::Neutron::LBaaS::Listener
+    properties:
+      loadbalancer: { get_resource: lb }
+      protocol: HTTP
+      protocol_port: 80
+
+  #create a neutron load balancer pool
+  lb_pool:
+    type: OS::Neutron::LBaaS::Pool
+    properties:
+      listener: { get_resource: lb_listener }
+      lb_algorithm: ROUND_ROBIN
+      protocol: HTTP
+      session_persistence:
+        type: SOURCE_IP
+
+  #create a neutron load balancer monitor
+  lb_monitor:
+    type: OS::Neutron::LBaaS::HealthMonitor
+    properties:
+      pool: { get_resource: lb_pool }
+      type: TCP
+      delay: 5
+      max_retries: 5
+      timeout: 5
+
+  # # assign a floating ip address to the load balancer pool
+  # lb_floating:
+  #   type: OS::Neutron::FloatingIP
+  #   properties:
+  #     floating_network_id: { get_param: public_network }
+  #     port_id: { get_attr: [lb, vip_port_id] }
+
+  #compute resources
+  #cloud-init (cloud config) for instance initialization/customization
+  cloud_config:
+    type: OS::Heat::CloudConfig
+    properties:
+      cloud_config:
+        users:
+        - default
+        - name: { get_param: username }
+          gecos: { get_param: gecos }
+          groups: sudo
+          lock-passwd: false
+          plain-text-passwd: demo
+          shell: /bin/bash
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          ssh-authorized-keys:
+          - { get_param: user_key }
+        package_update: true
+        package_upgrade: true
+        packages:
+        - apache2
+        write_files:
+        - path: /tmp/index.html
+          content: |
+                <!DOCTYPE html>
+                <html>
+                  <body>
+                    <h1>It works!</h1>
+                    <h2>Hostname: hostname</h2>
+                  </body>
+                </html>
+        runcmd:
+        - sed -i "1s/$/ $(hostname)/" /etc/hosts
+        - sed -i "s/hostname/$(hostname)/" /tmp/index.html
+        - cp /tmp/index.html /var/www/html/index.html
+        - apt-get install stress
+        - stress --cpu 8
+
+  # #create a nova instance (demo webserver)
+  demo_webserver2:
+    type: OS::Nova::Server
+    properties:
+      name: demo_webserver2
+      image: { get_param: image_id }
+      flavor: { get_param: instance_flavor }
+      key_name: { get_param: ssh_key_name }
+      networks:
+      - network: { get_resource: private_network }
+      #network: { get_resource: private_network }
+      #subnet: { get_resource: private_network_subnet }
+      security_groups:
+        - { get_resource: webserver_SG }
+      user_data_format: RAW
+      user_data: { get_resource: cloud_config }
+
+  # #create a pool member for neutron load balancer
+  member2:
+    type: OS::Neutron::LBaaS::PoolMember
+    properties:
+      pool: { get_resource: lb_pool }
+      address: { get_attr: [demo_webserver2, first_address] }
+      protocol_port: 80
+      subnet: { get_resource: private_network_subnet }
+
+  #auto scaling for the demo webservers   private_network
+  # #create a heat auto scaling group for the nova instances (demo webservers)
+  # autoscale_group:
+  #   type: OS::Heat::AutoScalingGroup
+  #   properties:
+  #     desired_capacity: 2
+  #     min_size: 2
+  #     max_size: 5
+  #     resource:
+  #       type: OS::Nova::Server
+  #       properties:
+  #        name: { get_param: server_name }
+  #        image: { get_param: image_id }
+  #        flavor: { get_param: instance_flavor }
+  #        key_name: { get_param: ssh_key_name }
+  #        networks:
+  #        - network: { get_resource: private_network }
+  #        #network: { get_resource: private_network }
+  #        #subnet: { get_resource: private_network_subnet }
+  #        security_groups:
+  #          - { get_resource: webserver_SG }
+  #        #metadata: { "metering.autoscale_group_name": "autoscale_group" }
+  #        metadata: { "metering.server_group": { get_param: "OS::stack_id" } }
+  #        user_data_format: RAW
+  #        user_data: { get_resource: cloud_config }
+
+
+  
+  autoscale_group:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      min_size: 1
+      max_size: 3
+      resource:
+       type: https://raw.githubusercontent.com/mohsinkamal95/openstack_autoscale/master/member.yaml
+       properties:
+        name: { get_param: server_name }
+        flavor: {get_param: instance_flavor}
+        image: {get_param: image_id}
+        key_name: {get_param: ssh_key_name}
+        network: {get_resource: private_network}
+        subnet: {get_resource: private_network_subnet}
+        pool_id: {get_resource: lb_pool}
+        metadata: { "metering.server_group": { get_param: "OS::stack_id" } }
+        # user_data_format: RAW
+        user_data: { get_resource: cloud_config }
+
+
+
+  #create a heat scaling policy for the scale out regarding the auto scaling group for the nova instances (demo webservers)
+  scaleout_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: autoscale_group }
+      cooldown: 60
+      scaling_adjustment: 1
+
+  #create a heat scaling policy for the scale in regarding the auto scaling group for the nova instances (demo webservers)
+  scalein_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: autoscale_group }
+      cooldown: 60
+      scaling_adjustment: -1
+
+  #create an alarm that indicates heat to scale out regarding the auto scaling group for the nova instances (demo webservers)
+  cpu_alarm_high:
+    type: OS::Aodh::GnocchiAggregationByResourcesAlarm
+    properties:
+      description: Scale out if CPU > 80% for 1 minute
+      metric: cpu_util
+      aggregation_method: mean
+      granularity: 60
+      evaluation_periods: 1
+      threshold: 80
+      resource_type: instance
+      comparison_operator: gt
+      alarm_actions:
+        - str_replace:
+            template: trust+url
+            params:
+              url: {get_attr: [scaleout_policy, signal_url]}
+      query:
+        list_join:
+          - ''
+          - - {'=': {server_group: {get_param: "OS::stack_id"}}}
+
+  #create an alarm that indicates heat to scale in regarding the auto scaling group for the nova instances (demo webservers)
+  cpu_alarm_low:
+    type: OS::Aodh::GnocchiAggregationByResourcesAlarm
+    properties:
+      description: Scale down if CPU < 10% for 1 minute
+      metric: cpu_util
+      aggregation_method: mean
+      granularity: 60
+      evaluation_periods: 1
+      threshold: 10
+      resource_type: instance
+      comparison_operator: lt
+      alarm_actions:
+        - str_replace:
+            template: trust+url
+            params:
+              url: {get_attr: [scalein_policy, signal_url]}
+      query:
+        list_join:
+          - ''
+          - - {'=': {server_group: {get_param: "OS::stack_id"}}}
+
+#this section (outputs) allows the definition of outputs after the heat stack was created
+outputs:
+  pool_ip_address:
+    value: { get_attr: [lb, vip_address] }
+    description: The IP address of the load balancing pool
