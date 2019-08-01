@@ -24,15 +24,11 @@ parameters:
   subnet:
     type: string
     description: Subnet used by the server
-  server_name:
-   type: string
-   label: server name
 
 resources:
   server:
     type: OS::Nova::Server
     properties:
-      name: { get_param: server_name }
       flavor: {get_param: flavor}
       image: {get_param: image}
       key_name: {get_param: key_name}
