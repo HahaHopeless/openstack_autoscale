@@ -24,9 +24,9 @@ parameters:
   subnet:
     type: string
     description: Subnet used by the server
-  security_grp:
-    type: string
-    description: Network used by the server
+#   security_grp:
+#     type: string
+#     description: Network used by the server
 
 resources:
   server:
