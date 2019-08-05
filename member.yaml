@@ -30,6 +30,7 @@ resources:
     type: OS::Nova::Server
     properties:
       flavor: {get_param: flavor}
+      admin_user: ubuntu
       image: {get_param: image}
       key_name: {get_param: key_name}
       metadata: {get_param: metadata}
