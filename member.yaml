@@ -24,9 +24,9 @@ parameters:
   subnet:
     type: string
     description: Subnet used by the server
-#   security_grp:
-#     type: string
-#     description: Network used by the server
+  security_grp:
+    type: string
+    description: Network used by the server
 
 resources:
   server:
@@ -40,8 +40,8 @@ resources:
       user_data: {get_param: user_data}
       user_data_format: RAW
       networks: [{network: {get_param: network} }]
-#       security_groups:
-#         - { get_param: security_grp }
+      security_groups:
+        - { get_param: security_grp }
   member:
     type: OS::Neutron::LBaaS::PoolMember
     properties:
