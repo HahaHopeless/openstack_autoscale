@@ -216,8 +216,8 @@ resources:
   autoscale_group:
     type: OS::Heat::AutoScalingGroup
     properties:
-      min_size: 4
-      max_size: 5
+      min_size: 2
+      max_size: 4
       resource:
        type: https://raw.githubusercontent.com/mohsinkamal95/openstack_autoscale/master/member.yaml
        properties:
