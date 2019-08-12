@@ -1,25 +1,23 @@
-heat_template_version: ocata
+heat_template_version: 2016-10-14
 description: Autoscaling
-
-#______________________________________________________________________________________________________________
 
 parameters:
   public_network:
     type: string
-    label: public network
-    description: public network (id or name) that is used as external network
+    label: Public Network
+    description: Public Network ID
     default: 96a1e024-5593-4936-bdad-869e4accac61
 
   dns_nameserver:
     type: comma_delimited_list
-    label: dns nameserver
-    description: ip addresses of dns servers that are used for neutron subnet creation
+    label: DNS Name Server
+    description: IP Address for access outside private network
     default: 192.168.73.252
 
   ssh_key_name:
     type: string
-    label: ssh key name
-    description: name of an existing ssh keypair that is injected during instance initialization
+    label: Key
+    description: Name of key pair. This will be used for creating new instances
     default: key
     hidden: false
     constraints:
@@ -27,8 +25,8 @@ parameters:
 
   image_id:
     type: string
-    label: image id
-    description: image id that is used for instance creation
+    label: Image ID
+    description: Image ID (Operating System). This OS will be installed on new instances
     default: a0d4c4ee-db97-4219-91f9-5d40372ce8c1
     hidden: false
     constraints:
@@ -36,8 +34,8 @@ parameters:
 
   instance_flavor:
     type: string
-    label: instance flavor that is used for instance creation
-    description: flavor used for instances
+    label: Flavor
+    description: Specs that the new instance should have
     default: 2
     hidden: false
     constraints:
@@ -45,14 +43,14 @@ parameters:
 
   server_name:
    type: string
-   label: server name
-   description: name of the instances
+   label: Instance Name
+   description: This name will be assigned to all newly created instances
    hidden: false
    default: webserver
 
   username:
     type: string
-    label: username
+    label: Username
     description: username of the additional user
     hidden: false
     default: admin
@@ -66,10 +64,10 @@ parameters:
 
   user_key:
     type: string
-    label: users public key
+    label: Public Key
     description: public key of the additional user that is injected during instance initialization
     hidden: false
-    default: ssh-rsa key
+    default: ssh-rsa AAAA
 
 #______________________________________________________________________________________________________________
 
@@ -225,6 +223,7 @@ resources:
        properties:
         flavor: {get_param: instance_flavor}
         image: {get_param: image_id}
+        server_SG: {get_resource: webserver_SG}
         key_name: {get_param: ssh_key_name}
         network: {get_resource: private_network}
         subnet: {get_resource: private_network_subnet}
